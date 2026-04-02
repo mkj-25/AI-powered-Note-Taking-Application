@@ -38,22 +38,35 @@ function VoiceRecorder({ onTranscription }) {
     setVisualizerData(new Array(20).fill(2));
   };
 
+  // Pick the best supported mimeType for Whisper compatibility
+  const getSupportedMimeType = () => {
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+    ];
+    return types.find((t) => MediaRecorder.isTypeSupported(t)) || '';
+  };
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       startVisualization(stream);
 
-      const mr = new MediaRecorder(stream);
+      const mimeType = getSupportedMimeType();
+      const options = mimeType ? { mimeType } : {};
+      const mr = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mr;
       chunksRef.current = [];
-      mr.ondataavailable = (e) => chunksRef.current.push(e.data);
-      mr.start();
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.start(250); // collect data every 250ms for reliability
       setRecording(true);
       setDuration(0);
       timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
-    } catch {
-      toast.error('Microphone access denied');
+    } catch (err) {
+      toast.error(err.name === 'NotAllowedError' ? 'Microphone access denied' : 'Could not start recording');
     }
   };
 
@@ -64,23 +77,31 @@ function VoiceRecorder({ onTranscription }) {
     setRecording(false);
 
     if (!mediaRecorderRef.current) return;
-    mediaRecorderRef.current.onstop = async () => {
-      const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      await transcribe(blob);
+    const mr = mediaRecorderRef.current;
+    mr.onstop = async () => {
+      // Use the recorder's actual mimeType for the blob
+      const mimeType = mr.mimeType || 'audio/webm';
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      await transcribe(blob, mimeType);
     };
-    mediaRecorderRef.current.stop();
+    mr.stop();
   };
 
-  const transcribe = async (blob) => {
+  const transcribe = async (blob, mimeType = 'audio/webm') => {
     setProcessing(true);
     try {
+      // Derive file extension from mimeType for Whisper to identify format
+      const ext = mimeType.includes('mp4') ? 'mp4'
+        : mimeType.includes('ogg') ? 'ogg'
+        : 'webm';
       const formData = new FormData();
-      formData.append('audio', blob, 'voice.webm');
+      formData.append('audio', blob, `voice.${ext}`);
       const res = await aiService.transcribeVoice(formData);
+      if (!res.text) throw new Error('Empty transcription');
       onTranscription?.(res.text);
       toast.success('Voice transcribed!');
-    } catch {
-      toast.error('Transcription failed');
+    } catch (err) {
+      toast.error(err.message === 'Empty transcription' ? 'No speech detected' : 'Transcription failed');
     } finally {
       setProcessing(false);
       setDuration(0);

@@ -1,0 +1,8 @@
+﻿Login status: 200
+Token OK: true  WorkspaceId: 69ce30502c8c169b574c8775
+Create status: 201
+Note ID: 69ce357fbeeebaa27b3b9031
+Update status: 500
+Update body: {"message":"Plan executor error during findAndModify :: caused by :: language override unsupported: javascript"}
+AI chat status: 500
+AI reply: AI service temporarily unavailable.

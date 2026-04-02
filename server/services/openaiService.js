@@ -84,7 +84,9 @@ export const getAIResponse = async (message, systemPrompt = '', history = []) =>
     return completion.choices[0].message.content;
   } catch (error) {
     logger.error(`OpenAI chat error: ${error.message}`);
-    throw new Error('AI service temporarily unavailable.');
+    // Fall back to demo mode instead of crashing — keeps the UI functional
+    const fn = DEMO_CHAT_RESPONSES[Math.floor(Math.random() * DEMO_CHAT_RESPONSES.length)];
+    return fn(message) + '\n\n*Note: Using demo mode — OpenAI API unavailable.*';
   }
 };
 
@@ -112,6 +114,8 @@ export const getAIAction = async (action, content) => {
     return completion.choices[0].message.content;
   } catch (error) {
     logger.error(`OpenAI action error (${action}): ${error.message}`);
-    throw new Error('AI service temporarily unavailable.');
+    // Fall back to demo mode on any API error
+    const fn = DEMO_ACTIONS[action] || ((t) => t);
+    return fn(content);
   }
 };

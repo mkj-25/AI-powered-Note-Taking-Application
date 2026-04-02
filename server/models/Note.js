@@ -25,7 +25,7 @@ const blockSchema = new mongoose.Schema({
   },
   content: { type: String, default: '' },
   checked: { type: Boolean, default: false },
-  language: { type: String, default: 'javascript' },
+  codeLang: { type: String, default: 'javascript' },  // renamed from 'language' — MongoDB treats embedded 'language' fields as text index overrides
   imageUrl: { type: String, default: '' },
 }, { _id: false });
 

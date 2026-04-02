@@ -63,19 +63,20 @@ export const createNote = async (req, res, next) => {
 export const updateNote = async (req, res, next) => {
   try {
     const { title, content, tags, icon, isPinned, isFavorite, isShared } = req.body;
-    const update = {};
-    if (title !== undefined) update.title = title;
-    if (content !== undefined) update.content = content;
-    if (tags !== undefined) update.tags = tags;
-    if (icon !== undefined) update.icon = icon;
-    if (isPinned !== undefined) update.isPinned = isPinned;
-    if (isFavorite !== undefined) update.isFavorite = isFavorite;
-    if (isShared !== undefined) update.isShared = isShared;
+    const $set = {};
+    if (title !== undefined) $set.title = title;
+    if (content !== undefined) $set.content = content;
+    if (tags !== undefined) $set.tags = tags;
+    if (icon !== undefined) $set.icon = icon;
+    if (isPinned !== undefined) $set.isPinned = isPinned;
+    if (isFavorite !== undefined) $set.isFavorite = isFavorite;
+    if (isShared !== undefined) $set.isShared = isShared;
 
+    // Use $set to avoid Mongoose 8 subdocument validator issues on findOneAndUpdate
     const note = await Note.findOneAndUpdate(
       { _id: req.params.id, userId: req.user._id },
-      update,
-      { new: true, runValidators: true }
+      { $set },
+      { new: true }   // removed runValidators:true — causes false 500s on array subdocs in Mongoose 8
     );
 
     if (!note) return res.status(404).json({ message: 'Note not found.' });

@@ -141,8 +141,15 @@ function AIChatPanel() {
   const [showVoice, setShowVoice] = useState(false);
 
   const bottomRef = useRef(null);
-  const inputRef = useRef(null);
   const textareaRef = useRef(null);
+  // Keep a ref to the latest state to avoid stale closures in sendMessage
+  const messagesRef = useRef(messages);
+  const loadingRef = useRef(loading);
+  const activeNoteRef = useRef(activeNote);
+
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { loadingRef.current = loading; }, [loading]);
+  useEffect(() => { activeNoteRef.current = activeNote; }, [activeNote]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -156,34 +163,42 @@ function AIChatPanel() {
     }
   }, [input]);
 
-  const sendMessage = useCallback(async (text) => {
-    const trimmed = (text || input).trim();
-    if (!trimmed || loading) return;
+  // sendMessage — stable callback that always reads latest state via refs
+  const sendMessage = useCallback(async (overrideText) => {
+    const trimmed = (overrideText !== undefined ? overrideText : textareaRef.current?.value || '').trim();
+    if (!trimmed || loadingRef.current) return;
 
-    setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
+    const userMsg = { role: 'user', content: trimmed };
+    setMessages((prev) => [...prev, userMsg]);
     setInput('');
+    if (textareaRef.current) textareaRef.current.value = '';
     setLoading(true);
 
     try {
-      const history = messages.map((m) => ({ role: m.role, content: m.content }));
-      const res = await aiService.chat(trimmed, history, activeNote?._id);
-      // Support both `reply` and `response` field names
+      // Exclude the initial welcome message (index 0 assistant msg) from history sent to AI
+      const currentMessages = messagesRef.current;
+      const historyStart = currentMessages[0]?.role === 'assistant' && currentMessages.length === 1 ? 1 : 0;
+      const history = currentMessages.slice(historyStart).map((m) => ({ role: m.role, content: m.content }));
+      const res = await aiService.chat(trimmed, history, activeNoteRef.current?._id);
       const reply = res.reply || res.response || 'No response.';
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
     } catch (err) {
-      setMessages((prev) => [...prev, {
-        role: 'assistant',
-        content: '⚠️ Something went wrong. Please try again.',
-      }]);
+      const status = err.response?.status;
+      let errMsg = '⚠️ Something went wrong. Please try again.';
+      if (status === 429) errMsg = '⚠️ Rate limit reached. Please wait a moment and try again.';
+      else if (status === 401) errMsg = '⚠️ Authentication error. Please reload the page.';
+      else if (status === 500) errMsg = '⚠️ AI service error. The server encountered an issue.';
+      else if (!navigator.onLine) errMsg = '⚠️ No internet connection.';
+      setMessages((prev) => [...prev, { role: 'assistant', content: errMsg }]);
     } finally {
       setLoading(false);
     }
-  }, [input, loading, messages, activeNote]);
+  }, []); // stable — reads state via refs
 
   const handleKey = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      sendMessage(); // will read value from textareaRef
     }
   };
 
@@ -202,7 +217,7 @@ function AIChatPanel() {
   const handleVoiceTranscription = (text) => {
     setShowVoice(false);
     setInput((prev) => prev + (prev ? ' ' : '') + text);
-    inputRef.current?.focus();
+    textareaRef.current?.focus();
   };
 
   return (

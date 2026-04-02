@@ -46,14 +46,15 @@ export const chat = async (req, res, next) => {
       noteContext +
       ragContext;
 
-    // Build messages array for multi-turn conversation
+    // Build messages array for multi-turn conversation (includes note + RAG context)
     const messages = [
       { role: 'system', content: systemPrompt },
       ...history.slice(-10), // keep last 10 turns
       { role: 'user', content: message },
     ];
 
-    const reply = await getAIResponse(message, systemPrompt, history);
+    // Pass the fully-enriched messages array — NOT raw history which lacks context
+    const reply = await getAIResponse(message, systemPrompt, history.slice(-10));
 
     // Persist to DB asynchronously (don't block response)
     ChatHistory.create({

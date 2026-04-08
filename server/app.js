@@ -8,7 +8,7 @@ import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
 
-// Middleware
+// ✅ FIXED CORS
 app.use(cors({
   origin: [
     "http://localhost:5173",
@@ -16,6 +16,7 @@ app.use(cors({
   ],
   credentials: true,
 }));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 

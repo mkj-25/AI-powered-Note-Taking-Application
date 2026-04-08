@@ -5,61 +5,56 @@ import { NOTE_TYPES } from '../../utils/constants';
 /**
  * EditorBlock — contentEditable block for the Notra editor.
  *
- * KEY FIX: We NEVER use dangerouslySetInnerHTML for live updates.
- * Instead, we use a ref and set innerHTML directly only:
- *   1. On initial mount of this block (block.id changes)
- *   2. When a remote/socket change comes in (block updated externally)
- * While the user is typing, the DOM is the source of truth → we only
- * read from it (innerText) and push upward via onChange. This prevents
- * the cursor-reset / "typing backwards" bug.
+ * TYPING BUG FIX:
+ * We NEVER write back to the DOM during user input. The pattern is:
+ *   1. On block identity change (new note / new block): set innerHTML once
+ *   2. On external (socket) change when NOT focused: update innerHTML
+ *   3. While user types: only READ innerText and push up via onChange
+ * This prevents React from resetting cursor position (the "typing backwards" bug).
  */
 function EditorBlock({ block, index, onChange, onDelete, onAddBelow, onKeyDown, autoFocus }) {
   const ref = useRef(null);
   const [hovered, setHovered] = useState(false);
   const isFocusedRef = useRef(false);
-  // Track the block id we last initialised so we know when to reset innerHTML
   const lastBlockIdRef = useRef(null);
 
-  // ── Initialise innerHTML when block identity changes (new block / note switch)
+  // ── Init innerHTML only when block identity changes ───────────────────────
   useEffect(() => {
     if (!ref.current) return;
-    // Only reset the DOM content when the block.id actually changed
     if (lastBlockIdRef.current !== block.id) {
       ref.current.innerHTML = block.content || '';
       lastBlockIdRef.current = block.id;
     }
   }, [block.id]);
 
-  // ── Sync content when it changes externally (socket / store update)
-  //    but ONLY when this element is NOT focused (user not typing)
+  // ── Sync content when changed externally (socket) but user isn't typing ──
   useEffect(() => {
-    if (!ref.current) return;
-    if (isFocusedRef.current) return; // user is typing — don't touch DOM
-    const current = ref.current.innerHTML;
-    if (current !== (block.content || '')) {
+    if (!ref.current || isFocusedRef.current) return;
+    const cur = ref.current.innerHTML;
+    if (cur !== (block.content || '')) {
       ref.current.innerHTML = block.content || '';
     }
   }, [block.content]);
 
-  // ── Auto-focus on new block
+  // ── Auto-focus on new block ───────────────────────────────────────────────
   useEffect(() => {
-    if (autoFocus && ref.current) {
-      ref.current.focus();
-      // Place cursor at end
-      try {
-        const range = document.createRange();
-        range.selectNodeContents(ref.current);
-        range.collapse(false);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } catch (_) {}
-    }
+    if (!autoFocus || !ref.current) return;
+    ref.current.focus();
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(ref.current);
+      range.collapse(false); // cursor at end
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (_) {}
   }, [autoFocus]);
 
+  // ── Event handlers ────────────────────────────────────────────────────────
+
   const handleInput = () => {
+    // Read from DOM — do NOT write back (causes cursor reset / "typing backwards")
     const text = ref.current?.innerText ?? '';
-    // Push to store — do NOT write back to the DOM (that causes the bug)
     onChange(index, { ...block, content: text });
   };
 
@@ -69,24 +64,24 @@ function EditorBlock({ block, index, onChange, onDelete, onAddBelow, onKeyDown, 
 
   const handleBlur = () => {
     isFocusedRef.current = false;
-    // Sync final content on blur to ensure consistency
+    // Final sync on blur for consistency
     const text = ref.current?.innerText ?? '';
     onChange(index, { ...block, content: text });
   };
 
   const handleKeyDown = (e) => {
-    onKeyDown(e, index, ref.current);
+    // Pass event and index to parent — parent owns block-level logic
+    onKeyDown(e, index);
   };
 
   const handlePaste = (e) => {
     e.preventDefault();
+    // Paste as plain text to avoid injecting HTML
     const text = e.clipboardData.getData('text/plain');
     document.execCommand('insertText', false, text);
   };
 
-  const blockStyle = getBlockStyle(block.type);
-
-  // ── Shared contentEditable props (no dangerouslySetInnerHTML!)
+  // ── Shared contentEditable props ──────────────────────────────────────────
   const editableProps = {
     contentEditable: true,
     suppressContentEditableWarning: true,
@@ -97,7 +92,9 @@ function EditorBlock({ block, index, onChange, onDelete, onAddBelow, onKeyDown, 
     onPaste: handlePaste,
   };
 
-  // ── Todo checkbox
+  const blockStyle = getBlockStyle(block.type);
+
+  // ── Todo ──────────────────────────────────────────────────────────────────
   if (block.type === NOTE_TYPES.TODO) {
     return (
       <div
@@ -126,17 +123,21 @@ function EditorBlock({ block, index, onChange, onDelete, onAddBelow, onKeyDown, 
     );
   }
 
-  // ── Divider
+  // ── Divider ───────────────────────────────────────────────────────────────
   if (block.type === NOTE_TYPES.DIVIDER) {
     return (
-      <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} style={{ position: 'relative', padding: '8px 0' }}>
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{ position: 'relative', padding: '8px 0' }}
+      >
         <BlockControls hovered={hovered} onDelete={() => onDelete(index)} onAdd={() => onAddBelow(index)} />
         <hr style={{ border: 'none', borderTop: '1px solid var(--border-default)' }} />
       </div>
     );
   }
 
-  // ── Callout
+  // ── Callout ───────────────────────────────────────────────────────────────
   if (block.type === NOTE_TYPES.CALLOUT) {
     return (
       <div
@@ -160,7 +161,7 @@ function EditorBlock({ block, index, onChange, onDelete, onAddBelow, onKeyDown, 
     );
   }
 
-  // ── Code block
+  // ── Code block ────────────────────────────────────────────────────────────
   if (block.type === NOTE_TYPES.CODE) {
     return (
       <div
@@ -187,16 +188,13 @@ function EditorBlock({ block, index, onChange, onDelete, onAddBelow, onKeyDown, 
     );
   }
 
-  // ── Quote
+  // ── Quote ─────────────────────────────────────────────────────────────────
   if (block.type === NOTE_TYPES.QUOTE) {
     return (
       <div
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        style={{
-          borderLeft: '3px solid var(--accent)', paddingLeft: '14px',
-          position: 'relative',
-        }}
+        style={{ borderLeft: '3px solid var(--accent)', paddingLeft: '14px', position: 'relative' }}
       >
         <BlockControls hovered={hovered} onDelete={() => onDelete(index)} onAdd={() => onAddBelow(index)} />
         <div
@@ -208,7 +206,7 @@ function EditorBlock({ block, index, onChange, onDelete, onAddBelow, onKeyDown, 
     );
   }
 
-  // ── Default: text, h1, h2, h3, bullet
+  // ── Default: text, h1, h2, h3, bullet ────────────────────────────────────
   return (
     <div
       onMouseEnter={() => setHovered(true)}
@@ -230,21 +228,12 @@ function EditorBlock({ block, index, onChange, onDelete, onAddBelow, onKeyDown, 
           minHeight: '24px',
           ...blockStyle,
         }}
-        onFocus={(e) => {
-          isFocusedRef.current = true;
-          if (!block.content) e.currentTarget.setAttribute('data-empty', 'true');
-        }}
-        onBlur={(e) => {
-          isFocusedRef.current = false;
-          e.currentTarget.removeAttribute('data-empty');
-          // Final sync on blur
-          const text = ref.current?.innerText ?? '';
-          onChange(index, { ...block, content: text });
-        }}
       />
     </div>
   );
 }
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function BlockControls({ hovered, onDelete, onAdd }) {
   return (
@@ -277,25 +266,38 @@ function BlockControls({ hovered, onDelete, onAdd }) {
   );
 }
 
+// ── Style helpers ─────────────────────────────────────────────────────────────
+
 function getBlockStyle(type) {
   switch (type) {
-    case NOTE_TYPES.HEADING1: return { fontSize: '2em', fontWeight: 700, color: 'var(--text-primary)', lineHeight: '1.3' };
-    case NOTE_TYPES.HEADING2: return { fontSize: '1.5em', fontWeight: 600, color: 'var(--text-primary)', lineHeight: '1.4' };
-    case NOTE_TYPES.HEADING3: return { fontSize: '1.2em', fontWeight: 600, color: 'var(--text-primary)', lineHeight: '1.5' };
-    case NOTE_TYPES.BULLET: return { fontSize: '14px', lineHeight: '1.7', color: 'var(--text-primary)' };
+    case NOTE_TYPES.HEADING1:
+    case 'h1': return { fontSize: '2em', fontWeight: 700, color: 'var(--text-primary)', lineHeight: '1.3' };
+    case NOTE_TYPES.HEADING2:
+    case 'h2': return { fontSize: '1.5em', fontWeight: 600, color: 'var(--text-primary)', lineHeight: '1.4' };
+    case NOTE_TYPES.HEADING3:
+    case 'h3': return { fontSize: '1.2em', fontWeight: 600, color: 'var(--text-primary)', lineHeight: '1.5' };
+    case NOTE_TYPES.BULLET:
+    case 'bullet': return { fontSize: '14px', lineHeight: '1.7', color: 'var(--text-primary)' };
     default: return { fontSize: '14px', lineHeight: '1.7', color: 'var(--text-primary)' };
   }
 }
 
 function getPlaceholder(type) {
   switch (type) {
-    case NOTE_TYPES.HEADING1: return 'Heading 1';
-    case NOTE_TYPES.HEADING2: return 'Heading 2';
-    case NOTE_TYPES.HEADING3: return 'Heading 3';
-    case NOTE_TYPES.BULLET: return 'List item';
-    case NOTE_TYPES.TODO: return 'To-do item';
-    case NOTE_TYPES.CODE: return 'Code...';
-    case NOTE_TYPES.QUOTE: return 'Quote...';
+    case NOTE_TYPES.HEADING1:
+    case 'h1': return 'Heading 1';
+    case NOTE_TYPES.HEADING2:
+    case 'h2': return 'Heading 2';
+    case NOTE_TYPES.HEADING3:
+    case 'h3': return 'Heading 3';
+    case NOTE_TYPES.BULLET:
+    case 'bullet': return 'List item';
+    case NOTE_TYPES.TODO:
+    case 'todo': return 'To-do item';
+    case NOTE_TYPES.CODE:
+    case 'code': return 'Code...';
+    case NOTE_TYPES.QUOTE:
+    case 'quote': return 'Quote...';
     default: return "Type '/' for commands";
   }
 }

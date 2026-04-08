@@ -35,7 +35,12 @@ const startServer = async () => {
   httpServer.listen(PORT, () => {
     logger.info(`🚀 Notra Server running on port ${PORT}`);
     logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-    logger.info(`🤖 AI Mode: ${process.env.OPENAI_API_KEY ? 'OpenAI' : 'Demo'}`);
+    
+    // Check which AI is active
+    let aiMode = 'Demo';
+    if (process.env.GEMINI_API_KEY) aiMode = 'Gemini';
+    else if (process.env.OPENAI_API_KEY) aiMode = 'OpenAI';
+    logger.info(`🤖 AI Mode: ${aiMode}`);
   });
 };
 

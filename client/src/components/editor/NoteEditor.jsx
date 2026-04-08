@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { nanoid } from 'nanoid';
 import toast from 'react-hot-toast';
-import { Star, StarOff, MoreHorizontal, Sparkles, Tag, Download } from 'lucide-react';
+import { Star, StarOff, MoreHorizontal, Tag, Download } from 'lucide-react';
 import EditorBlock from './EditorBlock';
 import SlashCommand from './SlashCommand';
 import useNoteStore from '../../stores/useNoteStore';
@@ -34,73 +34,85 @@ function NoteEditor() {
 
   const titleRef = useRef(null);
   const editorRef = useRef(null);
-  // track last note id so we can reset
   const lastNoteIdRef = useRef(null);
+  // Flag: true when we just sent a socket change — don't apply our own echo
+  const isLocalChangeRef = useRef(false);
 
-  // Sync from active note (reset when note changes)
+  // ── Sync from active note (reset when note changes) ──────────────────────
   useEffect(() => {
     if (!activeNote) return;
-    if (lastNoteIdRef.current === activeNote._id) return; // same note, don't reset
+    if (lastNoteIdRef.current === activeNote._id) return; // same note
     lastNoteIdRef.current = activeNote._id;
     setTitle(activeNote.title || '');
-    setBlocks(
-      activeNote.blocks?.length > 0
-        ? activeNote.blocks
-        : [makeBlock()]
-    );
-    // Reset slash command state
+    const initialBlocks = activeNote.blocks?.length > 0
+      ? activeNote.blocks
+      : [makeBlock()];
+    setBlocks(initialBlocks);
     setSlashVisible(false);
+    // Focus title on new note open
+    setTimeout(() => titleRef.current?.focus(), 60);
   }, [activeNote?._id]);
 
-  // Real-time collaboration
+  // ── Real-time collaboration ───────────────────────────────────────────────
   useEffect(() => {
     if (!activeNote?._id) return;
     joinRoom(activeNote._id);
+
     const unsub = onNoteChange(({ changes: remoteBlocks }) => {
-      if (Array.isArray(remoteBlocks)) setBlocks(remoteBlocks);
+      // Don't apply our own echoed change
+      if (isLocalChangeRef.current) return;
+      if (Array.isArray(remoteBlocks)) {
+        setBlocks(remoteBlocks);
+      }
     });
+
     return () => {
       leaveRoom(activeNote._id);
       unsub?.();
     };
-  }, [activeNote?._id]);
+  }, [activeNote?._id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-save — debounced
+  // ── Auto-save (debounced) ─────────────────────────────────────────────────
   const debouncedBlocks = useDebounce(blocks, 1200);
   const debouncedTitle = useDebounce(title, 800);
-
-  const saveRef = useRef({ title, blocks });
-  useEffect(() => {
-    saveRef.current = { title, blocks };
-  }, [title, blocks]);
 
   useEffect(() => {
     if (!activeNote?._id) return;
     updateNote(activeNote._id, { title: debouncedTitle, blocks: debouncedBlocks });
-    sendChange(activeNote._id, debouncedBlocks);
-  }, [debouncedTitle, debouncedBlocks]);
 
-  // ---- Block operations ----
+    // Emit to collaborators
+    isLocalChangeRef.current = true;
+    sendChange(activeNote._id, debouncedBlocks);
+    // Reset flag after a tick so we don't block incoming remote changes
+    setTimeout(() => { isLocalChangeRef.current = false; }, 300);
+  }, [debouncedTitle, debouncedBlocks]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Block operations ──────────────────────────────────────────────────────
+
   const updateBlock = useCallback((index, updated) => {
     setBlocks((prev) => {
-      const next = [...prev];
-
-      // Detect slash command
       const content = updated.content || '';
+
+      // Detect slash command trigger
       const slashIdx = content.lastIndexOf('/');
-      if (slashIdx !== -1) {
-        const query = content.slice(slashIdx + 1);
-        const rect = window.getSelection()?.getRangeAt(0)?.getBoundingClientRect?.();
-        if (rect) {
-          setSlashPos({ x: rect.left, y: rect.bottom + 4 });
-          setSlashQuery(query);
-          setSlashBlockIndex(index);
-          setSlashVisible(true);
-        }
-      } else {
+      if (slashIdx !== -1 && slashIdx === content.length - 1 || (slashIdx !== -1 && !content.slice(slashIdx + 1).includes(' '))) {
+        try {
+          const sel = window.getSelection();
+          if (sel?.rangeCount > 0) {
+            const rect = sel.getRangeAt(0).getBoundingClientRect();
+            if (rect.width !== 0 || rect.height !== 0) {
+              setSlashPos({ x: rect.left, y: rect.bottom + 4 });
+              setSlashQuery(content.slice(slashIdx + 1));
+              setSlashBlockIndex(index);
+              setSlashVisible(true);
+            }
+          }
+        } catch (_) {}
+      } else if (!content.includes('/')) {
         setSlashVisible(false);
       }
 
+      const next = [...prev];
       next[index] = updated;
       return next;
     });
@@ -113,24 +125,21 @@ function NoteEditor() {
     });
   }, []);
 
-  // addBlockBelow: if current block is bullet, new block is also bullet
-  const addBlockBelow = useCallback((index, inheritType = true) => {
-    const currentType = blocks[index]?.type;
-    // List-like blocks propagate their type; others create plain text
-    const propagatedTypes = [NOTE_TYPES.BULLET, NOTE_TYPES.TODO];
-    const newType = (inheritType && propagatedTypes.includes(currentType))
-      ? currentType
-      : NOTE_TYPES.TEXT;
-    const newBlock = makeBlock(newType);
+  // addBlockBelow: propagate type for lists (bullet, todo)
+  const addBlockBelow = useCallback((index) => {
     setBlocks((prev) => {
+      const currentType = prev[index]?.type;
+      const propagatedTypes = [NOTE_TYPES.BULLET, NOTE_TYPES.TODO];
+      const newType = propagatedTypes.includes(currentType) ? currentType : NOTE_TYPES.TEXT;
+      const newBlock = makeBlock(newType);
       const next = [...prev];
       next.splice(index + 1, 0, newBlock);
+      setNewBlockIndex(index + 1);
       return next;
     });
-    setNewBlockIndex(index + 1);
-  }, [blocks]);
+  }, []);
 
-  // After adding block, clear auto-focus sentinel
+  // Clear auto-focus sentinel
   useEffect(() => {
     if (newBlockIndex !== null) {
       const timer = setTimeout(() => setNewBlockIndex(null), 100);
@@ -142,64 +151,75 @@ function NoteEditor() {
     setSlashVisible(false);
     setBlocks((prev) => {
       const next = [...prev];
-      if (slashBlockIndex !== null) {
+      if (slashBlockIndex !== null && next[slashBlockIndex]) {
         const block = next[slashBlockIndex];
-        // Remove the /query from content
         const slashIdx = (block.content || '').lastIndexOf('/');
-        next[slashBlockIndex] = { ...block, content: block.content.slice(0, slashIdx), type };
+        next[slashBlockIndex] = {
+          ...block,
+          content: slashIdx >= 0 ? block.content.slice(0, slashIdx) : block.content,
+          type,
+        };
       }
       return next;
     });
   };
 
-  const handleBlockKeyDown = useCallback((e, index, el) => {
-    // Enter → new block below (same type for bullets/todos)
+  const handleBlockKeyDown = useCallback((e, index) => {
+    // Enter → new block below (list types propagate)
     if (e.key === 'Enter' && !e.shiftKey && blocks[index]?.type !== NOTE_TYPES.CODE) {
       e.preventDefault();
-      addBlockBelow(index, true);
+      addBlockBelow(index);
       setSlashVisible(false);
+      return;
     }
-    // Backspace on empty bullet → convert back to text, not delete
-    if (e.key === 'Backspace' && (el?.innerText || '').trim() === '') {
-      if (blocks[index]?.type === NOTE_TYPES.BULLET || blocks[index]?.type === NOTE_TYPES.TODO) {
-        e.preventDefault();
-        setBlocks((prev) => {
-          const next = [...prev];
-          next[index] = { ...next[index], type: NOTE_TYPES.TEXT };
-          return next;
-        });
-      } else if (blocks.length > 1) {
-        e.preventDefault();
-        deleteBlock(index);
+
+    // Backspace on empty bullet/todo → convert to text
+    if (e.key === 'Backspace') {
+      const el = e.currentTarget;
+      const text = (el?.innerText || '').trim();
+      if (text === '') {
+        const t = blocks[index]?.type;
+        if (t === NOTE_TYPES.BULLET || t === NOTE_TYPES.TODO) {
+          e.preventDefault();
+          setBlocks((prev) => {
+            const next = [...prev];
+            next[index] = { ...next[index], type: NOTE_TYPES.TEXT };
+            return next;
+          });
+        } else if (blocks.length > 1) {
+          e.preventDefault();
+          deleteBlock(index);
+        }
       }
     }
   }, [blocks, addBlockBelow, deleteBlock]);
 
-  // ---- Title ----
+  // ── Title ─────────────────────────────────────────────────────────────────
   const handleTitleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      // Focus first editor block
       editorRef.current?.querySelector('[contenteditable]')?.focus();
     }
   };
 
+  // ── Favorite ──────────────────────────────────────────────────────────────
   const handleToggleFavorite = async () => {
     if (!activeNote) return;
     const newVal = !activeNote.isFavorite;
-    // Optimistic update
+    // Optimistic update first for instant UI feedback
     updateActiveNoteLocally({ isFavorite: newVal });
-    // Persist
-    await toggleFavorite(activeNote._id);
-    toast.success(newVal ? 'Added to favorites' : 'Removed from favorites');
+    try {
+      await toggleFavorite(activeNote._id);
+      toast.success(newVal ? '⭐ Added to favorites' : 'Removed from favorites');
+    } catch {
+      // Rollback on error
+      updateActiveNoteLocally({ isFavorite: !newVal });
+      toast.error('Failed to update favorite');
+    }
   };
 
-  const moreMenuItems = [
-    { label: 'Add tag', icon: Tag, onClick: () => {} },
-    { label: 'Export as Markdown', icon: Download, onClick: exportMarkdown },
-    { divider: true },
-    { label: 'Delete note', icon: () => <span style={{ fontSize: '13px' }}>🗑</span>, danger: true, onClick: () => {} },
-  ];
-
+  // ── Export Markdown ───────────────────────────────────────────────────────
   function exportMarkdown() {
     const md = blocks.map((b) => {
       if (b.type === 'h1') return `# ${b.content}`;
@@ -220,6 +240,14 @@ function NoteEditor() {
     toast.success('Exported as Markdown');
   }
 
+  const moreMenuItems = [
+    { label: 'Add tag', icon: Tag, onClick: () => {} },
+    { label: 'Export as Markdown', icon: Download, onClick: exportMarkdown },
+    { divider: true },
+    { label: 'Delete note', icon: () => <span style={{ fontSize: '13px' }}>🗑</span>, danger: true, onClick: () => {} },
+  ];
+
+  // ── Empty state ───────────────────────────────────────────────────────────
   if (!activeNote) {
     return (
       <div style={{
@@ -234,6 +262,7 @@ function NoteEditor() {
     );
   }
 
+  // ── Editor render ─────────────────────────────────────────────────────────
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
       {/* Toolbar */}

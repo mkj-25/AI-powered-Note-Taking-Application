@@ -26,7 +26,7 @@ function LandingPage() {
   const navigate = useNavigate();
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', overflowX: 'hidden', overflowY: 'auto', position: 'relative' }}>
+    <div className="landing-page">
       {/* Nav */}
       <nav style={{
         position: 'sticky', top: 0, zIndex: 100,

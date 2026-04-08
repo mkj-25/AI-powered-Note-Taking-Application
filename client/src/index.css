@@ -60,15 +60,34 @@
   padding: 0;
 }
 
-html, body, #root {
+html {
   height: 100%;
   width: 100%;
 }
 
 body {
+  min-height: 100%;
+  width: 100%;
   background: var(--bg-primary);
   color: var(--text-primary);
-  /* overflow handled per-page: landing scrolls, app layout clips internally */
+  /* Default: no overflow restriction — landing page can scroll */
+}
+
+/* App shell (authenticated pages) — clips content, each panel scrolls independently */
+#root {
+  min-height: 100%;
+  width: 100%;
+}
+
+/* When inside app layout, the root is constrained */
+body.app-mode {
+  overflow: hidden;
+  height: 100%;
+}
+
+body.app-mode #root {
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Custom Scrollbar */
@@ -159,3 +178,21 @@ body {
 .tag-blue { background: var(--blue-light); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
 .tag-orange { background: var(--orange-light); color: var(--orange); border: 1px solid rgba(245,158,11,0.3); }
 .tag-red { background: var(--red-light); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+
+/* ContentEditable placeholder — shown when block is empty and not focused */
+[contenteditable][data-placeholder]:empty:not(:focus)::before {
+  content: attr(data-placeholder);
+  color: var(--text-disabled);
+  pointer-events: none;
+  font-style: normal;
+}
+
+/* Landing page — always scrollable */
+.landing-page {
+  min-height: 100vh;
+  width: 100%;
+  background: var(--bg-primary);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+

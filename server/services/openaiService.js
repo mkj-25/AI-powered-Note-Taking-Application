@@ -1,10 +1,11 @@
 import logger from '../utils/logger.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// ── Demo responses (when no OpenAI key) ─────────────────────────────────────
+// ── Demo responses (when no API key) ────────────────────────────────────────
 const DEMO_CHAT_RESPONSES = [
-  (msg) => `**Notra AI** (demo mode)\n\nYou asked: *"${msg.substring(0, 80)}${msg.length > 80 ? '…' : ''}"*\n\nHere's a thoughtful response:\n\n• Consider breaking this topic into smaller sections\n• Look for existing notes that relate to this idea\n• Try the / command menu in the editor for structure blocks\n\n*Connect an OpenAI API key for real AI responses.*`,
+  (msg) => `**Notra AI** (demo mode)\n\nYou asked: *"${msg.substring(0, 80)}${msg.length > 80 ? '…' : ''}"*\n\nHere's a thoughtful response:\n\n• Consider breaking this topic into smaller sections\n• Look for existing notes that relate to this idea\n• Try the / command menu in the editor for structure blocks\n\n*Connect a Gemini API key for real AI responses.*`,
   () => `**Key Insights** (demo mode)\n\n1. Your notes are building a knowledge base\n2. Use headings to organize ideas hierarchically\n3. AI summaries work best with detailed, structured notes\n\nWant me to help organize a specific topic?`,
-  () => `**Notra AI** here! 👋 (demo mode)\n\nI can help you:\n- 📝 Summarize long notes\n- 🧠 Generate study flashcards\n- ✍️ Improve your writing\n- 🔍 Search across all your notes\n\nAdd an OpenAI key in your **.env** to unlock full AI power!`,
+  () => `**Notra AI** here! 👋 (demo mode)\n\nI can help you:\n- 📝 Summarize long notes\n- 🧠 Generate study flashcards\n- ✍️ Improve your writing\n- 🔍 Search across all your notes\n\nAdd a Gemini API key in your **.env** to unlock full AI power!`,
 ];
 
 const DEMO_ACTIONS = {
@@ -37,30 +38,28 @@ const ACTION_PROMPTS = {
   translate: 'Translate the following to English:',
 };
 
-// ── OpenAI client (lazy loaded) ───────────────────────────────────────────────
-let openai = null;
+// ── Gemini client ───────────────────────────────────────────────────────────
+let genAI = null;
 
-const getOpenAI = async () => {
-  if (openai) return openai;
-  if (!process.env.OPENAI_API_KEY) return null;
+const getGemini = () => {
+  if (genAI) return genAI;
+  
+  // Checking for GEMINI_API_KEY, falling back to OPENAI_API_KEY if the user just replaced the value without renaming
+  const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  
   try {
-    const { default: OpenAI } = await import('openai');
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    return openai;
+    genAI = new GoogleGenerativeAI(apiKey);
+    return genAI;
   } catch (e) {
-    logger.warn('OpenAI SDK not available — running in demo mode');
+    logger.warn('Gemini SDK initialization failed — running in demo mode');
     return null;
   }
 };
 
 // ── getAIResponse — multi-turn chat ──────────────────────────────────────────
-/**
- * @param {string} message — latest user message
- * @param {string} systemPrompt — system context
- * @param {Array}  history — [{role, content}] previous turns (optional)
- */
 export const getAIResponse = async (message, systemPrompt = '', history = []) => {
-  const client = await getOpenAI();
+  const client = getGemini();
 
   if (!client) {
     const fn = DEMO_CHAT_RESPONSES[Math.floor(Math.random() * DEMO_CHAT_RESPONSES.length)];
@@ -68,31 +67,42 @@ export const getAIResponse = async (message, systemPrompt = '', history = []) =>
   }
 
   try {
-    const messages = [
-      { role: 'system', content: systemPrompt || 'You are Notra AI, a helpful, concise note-taking assistant.' },
-      ...history.slice(-10).map(({ role, content }) => ({ role, content })),
-      { role: 'user', content: message },
-    ];
+    const model = client.getGenerativeModel({ 
+      model: "gemini-2.0-flash",
+      systemInstruction: systemPrompt || 'You are Notra AI, a helpful, concise note-taking assistant. Return pure markdown.'
+    });
+    
+    // Convert generic history to Gemini format (user -> user, assistant/system -> model)
+    const geminiHistory = history.map(msg => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.content }]
+    }));
 
-    const completion = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
-      messages,
-      max_tokens: 1200,
-      temperature: 0.7,
+    const chatSession = model.startChat({
+      history: geminiHistory,
+      generationConfig: {
+        maxOutputTokens: 1200,
+        temperature: 0.7,
+      }
     });
 
-    return completion.choices[0].message.content;
+    const result = await chatSession.sendMessage(message);
+    return result.response.text();
   } catch (error) {
-    logger.error(`OpenAI chat error: ${error.message}`);
-    // Fall back to demo mode instead of crashing — keeps the UI functional
+    logger.error(`Gemini chat error: ${error.message}`);
+    // Specific handling for rate limit errors
+    if (error.status === 429 || error.message?.includes('429')) {
+      return `**Notra AI** ⚠️\n\nYou've hit the Gemini free-tier rate limit. Please wait a moment and try again.\n\n*The API is working correctly — this is just a temporary quota pause.*`;
+    }
+    // Fall back to demo mode for other errors
     const fn = DEMO_CHAT_RESPONSES[Math.floor(Math.random() * DEMO_CHAT_RESPONSES.length)];
-    return fn(message) + '\n\n*Note: Using demo mode — OpenAI API unavailable.*';
+    return fn(message) + '\n\n*Note: Using demo mode — Gemini API error.*';
   }
 };
 
 // ── getAIAction — single-turn text action ────────────────────────────────────
 export const getAIAction = async (action, content) => {
-  const client = await getOpenAI();
+  const client = getGemini();
 
   if (!client) {
     const fn = DEMO_ACTIONS[action] || ((t) => t);
@@ -100,21 +110,30 @@ export const getAIAction = async (action, content) => {
   }
 
   try {
+    const model = client.getGenerativeModel({ 
+      model: "gemini-2.0-flash",
+      systemInstruction: 'You are a concise writing assistant. Return only the processed result, no meta-commentary.'
+    });
+    
     const prompt = ACTION_PROMPTS[action] || `Perform the following action (${action}) on the content:`;
-    const completion = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
-      messages: [
-        { role: 'system', content: 'You are a concise writing assistant. Return only the processed result, no meta-commentary.' },
-        { role: 'user', content: `${prompt}\n\n${content}` },
-      ],
-      max_tokens: 1500,
-      temperature: 0.5,
+    const fullPrompt = `${prompt}\n\n${content}`;
+    
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+      generationConfig: {
+        maxOutputTokens: 1500,
+        temperature: 0.5,
+      }
     });
 
-    return completion.choices[0].message.content;
+    return result.response.text();
   } catch (error) {
-    logger.error(`OpenAI action error (${action}): ${error.message}`);
-    // Fall back to demo mode on any API error
+    logger.error(`Gemini action error (${action}): ${error.message}`);
+    // Specific handling for rate limit errors
+    if (error.status === 429 || error.message?.includes('429')) {
+      return `⚠️ **Rate limit reached.** The Gemini free-tier quota is temporarily exhausted. Please wait a moment and try again.`;
+    }
+    // Fall back to demo mode on other API errors
     const fn = DEMO_ACTIONS[action] || ((t) => t);
     return fn(content);
   }

@@ -21,8 +21,9 @@ const httpServer = createServer(app);
 // Socket.io setup
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: "*",
     methods: ['GET', 'POST'],
+    credentials: true
   },
 });
 
@@ -31,11 +32,11 @@ setupCollaborationSocket(io);
 // Connect to MongoDB and start server
 const startServer = async () => {
   await connectDB();
-  
+
   httpServer.listen(PORT, () => {
     logger.info(`🚀 Notra Server running on port ${PORT}`);
     logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-    
+
     // Check which AI is active
     let aiMode = 'Demo';
     if (process.env.GEMINI_API_KEY) aiMode = 'Gemini';

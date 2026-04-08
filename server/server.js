@@ -17,18 +17,11 @@ const PORT = process.env.PORT || 5000;
 
 const httpServer = createServer(app);
 
-// ✅ Allowed origins (VERY IMPORTANT)
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://code-clash-crfl.vercel.app/" // 🔁 REPLACE THIS
-];
-
-// ✅ Socket.io setup (FIXED CORS)
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: "*",
     methods: ['GET', 'POST'],
-    credentials: true
+
   },
 });
 

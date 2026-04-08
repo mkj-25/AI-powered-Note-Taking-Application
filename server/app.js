@@ -10,11 +10,7 @@ const app = express();
 
 // ✅ FIXED CORS
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://code-clash-crfl.vercel.app/"
-  ],
-  credentials: true,
+  origin: "*"
 }));
 
 app.use(express.json({ limit: '10mb' }));

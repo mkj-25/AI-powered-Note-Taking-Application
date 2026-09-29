@@ -18,7 +18,6 @@ semantically search across their entire knowledge base.
 - Create and manage structured notes
 - Organize notes using workspaces
 - AI-powered assistance
-- Semantic search
 - Real-time collaboration
 - OCR and voice-to-text support
 - Secure user authentication
@@ -50,55 +49,47 @@ semantically search across their entire knowledge base.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 NOTRA/
-├── client/                    # React frontend (Vite)
+├── client/                   
 │   ├── public/               
 │   └── src/
-│       ├── assets/            # Images
+│       ├── assets/            
 │       ├── components/
-│       │   ├── ai/            # AIChatPanel, VoiceRecorder
-│       │   ├── editor/        # NoteEditor, EditorBlock, SlashCommand
-│       │   ├── layout/        # MainLayout, Navbar, Sidebar, RightPanel
+│       │   ├── ai/            
+│       │   ├── editor/       
+│       │   ├── layout/        
 │       │   └── ui/            
-│       ├── hooks/             # useDebounce, useLocalStorage, useSocket
-│       ├── pages/             # LandingPage, LoginPage, DashboardPage, WorkspacePage
-│       ├── services/          # api.js (Axios), aiService, authService, notesService, workspaceService
+│       ├── hooks/            
+│       ├── pages/            
+│       ├── services/          
 │       ├── stores/            
 │       └── utils/             
 │
-├── server/                    # Node.js + Express backend
-│   ├── config/                # db.js (MongoDB connection)
-│   ├── controllers/           # authController, notesController, workspaceController, aiController
-│   ├── middleware/            # authMiddleware (JWT), errorHandler, multer
-│   ├── models/                # User, Note, Workspace, ChatHistory (Mongoose schemas)
-│   ├── routes/                # authRoutes, notesRoutes, workspaceRoutes, aiRoutes
-│   ├── services/              # openaiService (Gemini), embeddingService, ocrService, voiceService
-│   ├── sockets/               # collaborationSocket.js (Socket.IO rooms + cursors)
+├── server/                    
+│   ├── config/                
+│   ├── controllers/           
+│   ├── middleware/           
+│   ├── models/               
+│   ├── routes/               
+│   ├── services/              
+│   ├── sockets/               
 │   ├── utils/                 
-│   ├── app.js                 # Express app setup + route registration
-│   └── server.js              # HTTP server entry point + Socket.IO init
+│   ├── app.js                 
+│   └── server.js              
 │
 ├── shared/                    
 │
 ├── .env.example               
 ├── .gitignore
-└── package.json               # Root scripts: dev, server, client, install-all
+└── package.json               
 ```
 
 ---
 
 ## Getting Started
-
-### Prerequisites
-
-- **Node.js** ≥ 18
-- **npm** ≥ 9
-- A **MongoDB** instance (MongoDB Atlas free tier works)
-- A **Google Gemini API key**  - optional, app runs in demo mode without it
-- An **OpenAI API key** - optional; required only for Whisper voice transcription and OpenAI-based embeddings
 
 ### Installation
 
